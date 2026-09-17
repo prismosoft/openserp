@@ -17,19 +17,25 @@ FROM chromedp/headless-shell:stable@sha256:f7e7ac721b023cb8717f8108aef8b3e49995f
 WORKDIR /usr/src/app
 
 # wget: used by HEALTHCHECK (localhost, no TLS, so ca-certificates not required).
-# dumb-init: already provided by `docker run --init` / compose `init: true`, so we do NOT add tini here — the PID1 reaper is supplied by the runtime.
+# dumb-init: already provided by `docker run --init` / compose `init: true`,
+# so we do NOT add tini here — the PID1 reaper is supplied by the runtime.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends wget \
   && rm -rf /var/lib/apt/lists/* \
   && getent passwd chrome >/dev/null 2>&1 || useradd --create-home --uid 1001 --shell /bin/bash chrome \
-  && chown chrome:chrome /usr/src/app
+  && chown chrome:chrome /usr/src/app \
+  && echo '#!/bin/sh\nexec /headless-shell/headless-shell --no-sandbox "$@"' > /usr/local/bin/headless-wrapper \
+  && chmod +x /usr/local/bin/headless-wrapper
 
 COPY --from=builder /app/openserp /usr/local/bin/openserp
 COPY --chown=chrome:chrome config.yaml ./config.yaml
 
 # Rod's launcher.LookPath does not know about /headless-shell/headless-shell.
-# Viper auto-binds OPENSERP_APP_BROWSER_PATH to app.browser_path, so this pins the binary and avoids Rod's runtime chromium auto-download (which would fail in this non-root, network-restricted image).
-ENV OPENSERP_APP_BROWSER_PATH=/headless-shell/headless-shell \
+# Viper auto-binds OPENSERP_APP_BROWSER_PATH to app.browser_path.
+# Railway's container runtime can hit Chromium sandbox permission errors
+# when running as this non-root user, so browser launches go through
+# a wrapper that disables Chromium's Linux sandbox.
+ENV OPENSERP_APP_BROWSER_PATH=/usr/local/bin/headless-wrapper \
   OPENSERP_SERVER_HOST=0.0.0.0 \
   OPENSERP_SERVER_PORT=7000
 
@@ -39,3 +45,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget --quiet --tries=1 --spider "http://127.0.0.1:${OPENSERP_SERVER_PORT}/health" || exit 1
 
 ENTRYPOINT ["openserp"]
+CMD ["serve"]
