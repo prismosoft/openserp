@@ -72,6 +72,7 @@ cors:
 
 captcha:
   solver_enabled: false # Global captcha solver gate (requires 2captcha.apikey)
+  solve_timeout_seconds: 100 # Bounds one solve; the 2captcha client would otherwise wait 600s
 
 google:
   rate_requests: 60 # Allowed average requests per minute
