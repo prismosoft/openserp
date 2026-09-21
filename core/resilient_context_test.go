@@ -104,7 +104,7 @@ func TestResilientSearchPrimary_ContextErrorsDoNotOpenCircuit(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
-	if state := rs.cbManager.Get(engine.Name()).State(); state != CircuitClosed {
+	if state := rs.cbManager.Get(engine.Name(), CapabilitySearch).State(); state != CircuitClosed {
 		t.Fatalf("circuit state = %s, want closed", state)
 	}
 }
@@ -138,7 +138,7 @@ func TestResilientSearchPrimary_LimiterDeadlineDoesNotOpenCircuit(t *testing.T) 
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
 	}
-	if state := rs.cbManager.Get(engine.Name()).State(); state != CircuitClosed {
+	if state := rs.cbManager.Get(engine.Name(), CapabilitySearch).State(); state != CircuitClosed {
 		t.Fatalf("circuit state = %s, want closed", state)
 	}
 }
@@ -154,7 +154,7 @@ func TestResilientSearchPrimary_EngineFailureStillOpensCircuit(t *testing.T) {
 	if !errors.Is(err, ErrParser) {
 		t.Fatalf("expected ErrParser, got %v", err)
 	}
-	if state := rs.cbManager.Get(engine.Name()).State(); state != CircuitOpen {
+	if state := rs.cbManager.Get(engine.Name(), CapabilitySearch).State(); state != CircuitOpen {
 		t.Fatalf("circuit state = %s, want open", state)
 	}
 }

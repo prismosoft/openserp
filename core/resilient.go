@@ -164,7 +164,7 @@ func (rs *ResilientSearcher) searchWithProtection(ctx context.Context, engine Se
 	if ctx.Err() != nil {
 		return nil, ProxyExecutionMeta{}, ctx.Err()
 	}
-	cb := rs.cbManager.Get(engine.Name())
+	cb := rs.cbManager.Get(engine.Name(), CapabilityFor(isImage))
 	engineCtx := WithEngine(ctx, engine.Name())
 	if !cb.AllowRequest(engineCtx) {
 		return nil, ProxyExecutionMeta{}, ErrCircuitOpen
@@ -381,7 +381,7 @@ func (rs *ResilientSearcher) searchFastestDetailed(ctx context.Context, q Query,
 	)
 
 	for _, engine := range engines {
-		cb := rs.cbManager.Get(engine.Name())
+		cb := rs.cbManager.Get(engine.Name(), CapabilityFor(isImage))
 		if !engine.IsInitialized() {
 			unavailable = append(unavailable, engineErrorDetail(engine.Name(), fmt.Errorf("not initialized"), q))
 			continue
@@ -447,7 +447,7 @@ func (rs *ResilientSearcher) runParallelDetailed(ctx context.Context, q Query, e
 			continue
 		}
 		engineCtx := WithEngine(ctx, engine.Name())
-		if !rs.cbManager.Get(engine.Name()).AllowRequest(engineCtx) {
+		if !rs.cbManager.Get(engine.Name(), CapabilityFor(isImage)).AllowRequest(engineCtx) {
 			WithRequest(engineCtx).Debug("Skipping engine in mega search: circuit open")
 			resultCh <- engineResult{name: engine.Name(), err: ErrCircuitOpen}
 			started++
