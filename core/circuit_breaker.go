@@ -42,10 +42,37 @@ func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
 	}
 }
 
-// CircuitBreaker tracks failure state for one engine.
+// SearchCapability names the kind of request a breaker tracks.
+//
+// An engine can serve one capability perfectly while the other is dead:
+// DuckDuckGo's image page became a JS-only shell while its web search kept
+// answering in ~1.2s. Pooling both under the engine name hides the dead half
+// behind the healthy half's successes, so the breaker never opens and /health
+// keeps reporting the engine "ready" — which is how a broken capability can
+// go on taking traffic at ~12s a request until a human notices.
+type SearchCapability string
+
+const (
+	CapabilitySearch SearchCapability = "search"
+	CapabilityImage  SearchCapability = "image"
+)
+
+// CapabilityFor maps the isImage flag the search paths already carry onto a
+// capability name.
+func CapabilityFor(isImage bool) SearchCapability {
+	if isImage {
+		return CapabilityImage
+	}
+	return CapabilitySearch
+}
+
+func (c SearchCapability) String() string { return string(c) }
+
+// CircuitBreaker tracks failure state for one engine capability.
 type CircuitBreaker struct {
 	mu              sync.RWMutex
 	name            string
+	capability      SearchCapability
 	state           CircuitState
 	config          CircuitBreakerConfig
 	failureCount    int
@@ -63,6 +90,20 @@ func NewCircuitBreaker(name string, cfg CircuitBreakerConfig) *CircuitBreaker {
 		config:          cfg,
 		lastStateChange: time.Now(),
 	}
+}
+
+// NewCapabilityCircuitBreaker builds a breaker scoped to one capability of one
+// engine, so a dead capability trips on its own evidence.
+func NewCapabilityCircuitBreaker(engineName string, capability SearchCapability, cfg CircuitBreakerConfig) *CircuitBreaker {
+	cb := NewCircuitBreaker(engineName, cfg)
+	cb.capability = capability
+	return cb
+}
+
+// Capability reports which capability this breaker tracks, empty for a breaker
+// built without one.
+func (cb *CircuitBreaker) Capability() SearchCapability {
+	return cb.capability
 }
 
 func (cb *CircuitBreaker) AllowRequest(ctx context.Context) bool {
@@ -152,6 +193,9 @@ func (cb *CircuitBreaker) Stats() map[string]interface{} {
 		"failure_count": cb.failureCount,
 		"last_changed":  cb.lastStateChange.Format(time.RFC3339),
 	}
+	if cb.capability != "" {
+		stats["capability"] = cb.capability.String()
+	}
 
 	if cb.state == CircuitOpen {
 		remaining := cb.config.RecoveryTimeout - time.Since(cb.lastFailureTime)
@@ -200,9 +244,14 @@ func NewCircuitBreakerManager(cfg CircuitBreakerConfig) *CircuitBreakerManager {
 	}
 }
 
-func (m *CircuitBreakerManager) Get(engineName string) *CircuitBreaker {
+// Get returns the breaker for one capability of one engine, creating it on
+// first use. Keying by capability is what lets a dead image endpoint trip
+// while the same engine's web search keeps serving.
+func (m *CircuitBreakerManager) Get(engineName string, capability SearchCapability) *CircuitBreaker {
+	key := breakerKey(engineName, capability)
+
 	m.mu.RLock()
-	if cb, ok := m.breakers[engineName]; ok {
+	if cb, ok := m.breakers[key]; ok {
 		m.mu.RUnlock()
 		return cb
 	}
@@ -211,13 +260,20 @@ func (m *CircuitBreakerManager) Get(engineName string) *CircuitBreaker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if cb, ok := m.breakers[engineName]; ok {
+	if cb, ok := m.breakers[key]; ok {
 		return cb
 	}
 
-	cb := NewCircuitBreaker(engineName, m.config)
-	m.breakers[engineName] = cb
+	cb := NewCapabilityCircuitBreaker(engineName, capability, m.config)
+	m.breakers[key] = cb
 	return cb
+}
+
+func breakerKey(engineName string, capability SearchCapability) string {
+	if capability == "" {
+		return engineName
+	}
+	return engineName + ":" + capability.String()
 }
 
 func (m *CircuitBreakerManager) AllStats() []map[string]interface{} {

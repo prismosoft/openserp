@@ -160,14 +160,25 @@ func TestCircuitBreaker_Stats(t *testing.T) {
 	}
 }
 
-// TestCircuitBreakerManager_AllStats verifies manager creates and reports per-engine breakers.
+// TestCircuitBreakerManager_AllStats verifies manager creates and reports one
+// breaker per engine capability.
 func TestCircuitBreakerManager_AllStats(t *testing.T) {
 	mgr := NewCircuitBreakerManager(DefaultCircuitBreakerConfig())
-	mgr.Get("google")
-	mgr.Get("yandex")
+	mgr.Get("google", CapabilitySearch)
+	mgr.Get("yandex", CapabilitySearch)
 
 	stats := mgr.AllStats()
 	if len(stats) != 2 {
 		t.Errorf("expected 2 entries, got: %d", len(stats))
+	}
+
+	// The same engine's other capability is a separate breaker, which is the
+	// whole point: a dead image endpoint must trip without taking web with it.
+	mgr.Get("google", CapabilityImage)
+	if stats := mgr.AllStats(); len(stats) != 3 {
+		t.Errorf("expected image to add a breaker, got: %d", len(stats))
+	}
+	if mgr.Get("google", CapabilityImage) == mgr.Get("google", CapabilitySearch) {
+		t.Error("image and search must not share a breaker")
 	}
 }

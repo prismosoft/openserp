@@ -1846,6 +1846,28 @@ components:
         status:
           type: string
           enum: [ready, not_initialized, circuit_open]
+          description: >-
+            Aggregate over the engine's capabilities. Reports ready while any
+            capability still serves, so a client that predates `capabilities`
+            does not drop a half-working engine. Prefer `capabilities`.
+        capabilities:
+          type: object
+          description: >-
+            Readiness of each capability separately. An engine can serve one
+            capability while the other is dead, so a caller should skip the
+            dead capability rather than the whole engine.
+          additionalProperties:
+            $ref: "#/components/schemas/CapabilityHealth"
+          example:
+            search: { status: ready }
+            image: { status: circuit_open }
+    CapabilityHealth:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_initialized, circuit_open]
     HealthStatus:
       type: object
       required: [status, uptime, engines, system]

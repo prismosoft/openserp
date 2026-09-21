@@ -632,7 +632,39 @@ type ReadinessStatus struct {
 type EngineHealth struct {
 	Name        string `json:"name"`
 	Initialized bool   `json:"initialized"`
-	Status      string `json:"status"`
+	// Status aggregates the capabilities: an engine is only unavailable once
+	// every capability is. It stays for clients that predate Capabilities, and
+	// deliberately keeps reporting "ready" while one capability still serves,
+	// so an old client does not drop a half-working engine.
+	Status string `json:"status"`
+	// Capabilities reports each capability separately, so a caller can skip a
+	// dead image endpoint without giving up the engine's working web search.
+	Capabilities map[string]CapabilityHealth `json:"capabilities,omitempty"`
+}
+
+// CapabilityHealth is the readiness of one capability of one engine.
+type CapabilityHealth struct {
+	Status string `json:"status"`
+}
+
+// circuitOpenFor reports whether the breaker for one engine capability is
+// open. A breaker is only created on first use, so a capability with no
+// breaker yet is healthy rather than unknown.
+func circuitOpenFor(cbStats []map[string]interface{}, engineName string, capability SearchCapability) bool {
+	for _, stat := range cbStats {
+		if name, _ := stat["engine"].(string); name != engineName {
+			continue
+		}
+		// A breaker recorded before capability keying carries no capability
+		// and applies to the engine as a whole.
+		if statCapability, _ := stat["capability"].(string); statCapability != "" && statCapability != capability.String() {
+			continue
+		}
+		if state, _ := stat["state"].(string); state == "open" {
+			return true
+		}
+	}
+	return false
 }
 
 // handleHealthCheck returns current service and engine status.
@@ -641,35 +673,41 @@ func (s *Server) handleHealthCheck(c *fiber.Ctx) error {
 	engines := make([]EngineHealth, 0, len(s.searchEngines))
 	availableEngines := 0
 
+	cbStats := s.resilient.GetCircuitBreakerStats()
+
 	for _, engine := range s.searchEngines {
-		status := "ready"
-		isAvailable := true
-		if !engine.IsInitialized() {
-			status = "not_initialized"
-			isAvailable = false
-		}
+		capabilities := make(map[string]CapabilityHealth, 2)
+		anyCapabilityAvailable := false
 
-		for _, cbStat := range s.resilient.GetCircuitBreakerStats() {
-			engineName, _ := cbStat["engine"].(string)
-			if engineName != engine.Name() {
-				continue
-			}
-			circuitState, _ := cbStat["state"].(string)
-			if circuitState == "open" {
+		for _, capability := range []SearchCapability{CapabilitySearch, CapabilityImage} {
+			status := "ready"
+			if !engine.IsInitialized() {
+				status = "not_initialized"
+			} else if circuitOpenFor(cbStats, engine.Name(), capability) {
 				status = "circuit_open"
-				isAvailable = false
+			} else {
+				anyCapabilityAvailable = true
 			}
-			break
+			capabilities[capability.String()] = CapabilityHealth{Status: status}
 		}
 
-		if isAvailable {
+		status := "ready"
+		switch {
+		case !engine.IsInitialized():
+			status = "not_initialized"
+		case !anyCapabilityAvailable:
+			status = "circuit_open"
+		}
+
+		if anyCapabilityAvailable {
 			availableEngines++
 		}
 
 		engines = append(engines, EngineHealth{
-			Name:        engine.Name(),
-			Initialized: engine.IsInitialized(),
-			Status:      status,
+			Name:         engine.Name(),
+			Initialized:  engine.IsInitialized(),
+			Status:       status,
+			Capabilities: capabilities,
 		})
 	}
 
