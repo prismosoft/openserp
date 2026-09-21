@@ -282,7 +282,7 @@ func TestResolveCaptchaSolverConfigDisabledWithoutKey(t *testing.T) {
 	config.Captcha.SolverEnabled = false
 	config.Config2Capcha.ApiKey = ""
 
-	enabled, key, err := resolveCaptchaSolverConfig()
+	enabled, key, _, err := resolveCaptchaSolverConfig()
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -305,7 +305,7 @@ func TestResolveCaptchaSolverConfigEnabledWithoutKeyFails(t *testing.T) {
 	config.Captcha.SolverEnabled = true
 	config.Config2Capcha.ApiKey = ""
 
-	_, _, err := resolveCaptchaSolverConfig()
+	_, _, _, err := resolveCaptchaSolverConfig()
 	if err == nil {
 		t.Fatal("expected missing API key error")
 	}
@@ -325,7 +325,7 @@ func TestResolveCaptchaSolverConfigEnabledWithKey(t *testing.T) {
 	config.Captcha.SolverEnabled = true
 	config.Config2Capcha.ApiKey = "api-key"
 
-	enabled, key, err := resolveCaptchaSolverConfig()
+	enabled, key, _, err := resolveCaptchaSolverConfig()
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

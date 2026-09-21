@@ -43,6 +43,9 @@ type BrowserOpts struct {
 	CaptchaSolverApiKey string
 	// CaptchaSolverEnabled gates solver invocation regardless of engine flags.
 	CaptchaSolverEnabled bool
+	// CaptchaSolverTimeout bounds the wait for a single solve. Zero means
+	// DefaultCaptchaSolveTimeout.
+	CaptchaSolverTimeout time.Duration
 	// BrowserPath optionally points to a specific browser executable.
 	BrowserPath string
 	// ProxyURL defines the upstream proxy for browser traffic.
@@ -335,7 +338,7 @@ func NewBrowser(opts BrowserOpts) (*Browser, error) {
 	b.browserAddr, err = l.Launch()
 
 	if opts.CaptchaSolverEnabled && opts.CaptchaSolverApiKey != "" {
-		b.CaptchaSolver = NewSolver(opts.CaptchaSolverApiKey)
+		b.CaptchaSolver = NewSolver(opts.CaptchaSolverApiKey, opts.CaptchaSolverTimeout)
 		logrus.Debug("Captcha solver initialized")
 	}
 
@@ -352,6 +355,7 @@ func browserOptsLogFields(opts BrowserOpts) logrus.Fields {
 		"leave_page_open":         opts.LeavePageOpen,
 		"captcha_solver_enabled":  opts.CaptchaSolverEnabled,
 		"captcha_solver_has_key":  strings.TrimSpace(opts.CaptchaSolverApiKey) != "",
+		"captcha_solver_timeout":  opts.CaptchaSolverTimeout.String(),
 		"browser_path_configured": strings.TrimSpace(opts.BrowserPath) != "",
 		"proxy":                   maskedProxyLogValue(opts.ProxyURL),
 		"insecure":                opts.Insecure,
