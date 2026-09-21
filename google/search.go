@@ -76,7 +76,7 @@ func (gogl *Google) getTotalResults(page *rod.Page) (int, error) {
 	return total, nil
 }
 
-func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string) bool {
+func (gogl *Google) solveCaptcha(ctx context.Context, page *rod.Page, sitekey, datas, proxyURL string) bool {
 	gogl.logger.Debug("Solve captcha: sitekey=%s", sitekey)
 
 	if gogl.CaptchaSolver == nil {
@@ -101,7 +101,15 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string
 	}
 
 	gogl.logger.Debug("Captcha response received")
-	_, err = page.Eval(fmt.Sprintf(`;(() => { document.getElementById("g-recaptcha-response").innerHTML="%s"; submitCallback(); })();`, resp))
+	// The token has been bought by this point. Injecting it must not be done
+	// on the caller's context: a solve takes tens of seconds, routinely longer
+	// than the request deadline, so that context is usually already dead here
+	// and the page would fail with "context deadline exceeded" — throwing away
+	// a solve that was paid for. Detach, with a bound of its own.
+	injectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), solvedCaptchaInjectTimeout)
+	defer cancel()
+
+	_, err = page.Context(injectCtx).Eval(fmt.Sprintf(`;(() => { document.getElementById("g-recaptcha-response").innerHTML="%s"; submitCallback(); })();`, resp))
 	if err != nil {
 		gogl.logger.Error("Failed to set captcha response: %s", err)
 		return false
@@ -109,6 +117,11 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string
 
 	return true
 }
+
+// solvedCaptchaInjectTimeout bounds the post-solve page work — injecting the
+// token and letting the resulting navigation land. It runs on a context
+// detached from the request, so it must carry its own deadline.
+const solvedCaptchaInjectTimeout = 30 * time.Second
 
 // classifyPage runs the same captcha/soft-block/no-results rules the raw HTML
 // path uses (search_raw.go), against a snapshot of the live page, so both
@@ -153,7 +166,7 @@ func (gogl *Google) solveCaptchaOnPage(ctx context.Context, page *rod.Page, quer
 	if strings.TrimSpace(proxyURL) == "" {
 		proxyURL = gogl.ProxyURL
 	}
-	if !gogl.solveCaptcha(page, *sitekey, *dataS, proxyURL) {
+	if !gogl.solveCaptcha(ctx, page, *sitekey, *dataS, proxyURL) {
 		return false
 	}
 	gogl.persistSolvedLaneCookies(ctx, page)
@@ -174,15 +187,22 @@ func (gogl *Google) persistSolvedLaneCookies(ctx context.Context, page *rod.Page
 	if page == nil {
 		return
 	}
-	if err := page.Timeout(solvedCaptchaSettleTimeout).WaitLoad(); err != nil {
+	// Same reasoning as the token injection: by now the request context has
+	// usually expired, and the exemption cookie is the whole return on the
+	// solve. The lane key still comes from the original ctx.
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), solvedCaptchaSettleTimeout)
+	defer cancel()
+	settlePage := page.Context(settleCtx)
+
+	if err := settlePage.WaitLoad(); err != nil {
 		gogl.logger.Debug("Post-captcha load wait ended early: %s", err)
 	}
-	info, err := page.Info()
+	info, err := settlePage.Info()
 	if err != nil {
 		gogl.logger.Debug("Cannot read page info after captcha solve: %s", err)
 		return
 	}
-	gogl.SaveLaneCookies(ctx, page, info.URL)
+	gogl.SaveLaneCookies(ctx, settlePage, info.URL)
 }
 
 func (gogl *Google) preparePage(page *rod.Page) {
