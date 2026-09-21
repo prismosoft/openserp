@@ -159,6 +159,7 @@ func buildServerOptions(corsCfg core.CORSConfig, proxyCfg core.ProxyConfig, fing
 		CacheTTL:               time.Duration(config.Cache.TTLSeconds) * time.Second,
 		CacheMaxSize:           config.Cache.MaxSize,
 		EnableCORS:             config.CORS.Enabled,
+		Auth:                   authConfigFromSettings(config.Auth),
 		CORS:                   corsCfg,
 		AllowEndpointFallback:  config.Resilience.AllowEndpointFallback,
 		EnableDebugEndpoints:   config.App.DebugEndpoints,
@@ -727,4 +728,17 @@ func entryHasTag(entry core.ProxyEntryConfig, tag string) bool {
 
 func init() {
 	RootCmd.AddCommand(serveCMD)
+}
+
+// authConfigFromSettings turns the comma-separated configuration value into
+// the server's key list, dropping blanks so a trailing comma or an empty
+// environment variable cannot enable authentication with an unusable key.
+func authConfigFromSettings(cfg AuthConfig) core.AuthConfig {
+	keys := []string{}
+	for _, key := range strings.Split(cfg.APIKeys, ",") {
+		if trimmed := strings.TrimSpace(key); trimmed != "" {
+			keys = append(keys, trimmed)
+		}
+	}
+	return core.AuthConfig{APIKeys: keys, HeaderName: strings.TrimSpace(cfg.Header)}
 }
