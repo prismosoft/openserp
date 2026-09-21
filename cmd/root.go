@@ -348,8 +348,19 @@ func initializeConfig(cmd *cobra.Command) error {
 	return nil
 }
 
+// engineNames are the engines this build ships, in the order their config
+// sections appear.
+var engineNames = []string{
+	"google",
+	"yandex",
+	"baidu",
+	"bing",
+	"duckduckgo",
+	"ecosia",
+}
+
 func validateEngineProxyTags(v *viper.Viper) error {
-	for _, engineName := range []string{"google", "yandex", "baidu", "bing", "duckduckgo", "ecosia"} {
+	for _, engineName := range engineNames {
 		key := engineName + ".proxy"
 		if !v.IsSet(key) {
 			continue
@@ -359,6 +370,13 @@ func validateEngineProxyTags(v *viper.Viper) error {
 		tag, ok := raw.(string)
 		if !ok {
 			return fmt.Errorf("invalid %s.proxy config: proxy must be a string tag", engineName)
+		}
+
+		// Empty means no proxy for this engine, which is what an absent key has
+		// always meant. The key now always exists so it can be set from the
+		// environment, so emptiness is the signal rather than absence.
+		if strings.TrimSpace(tag) == "" {
+			continue
 		}
 
 		if _, err := core.NormalizeProxyTag(tag); err != nil {
@@ -428,6 +446,10 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("app.mega_timeout", "90s")
 
 	v.SetDefault("proxies.entries", []interface{}{})
+	// `entries` is a list of objects, which cannot come from one environment
+	// variable. This string form can, so an env-only deployment can define a
+	// proxy pool instead of being limited to a single global proxy.
+	v.SetDefault("proxies.entry_urls", "")
 	v.SetDefault("proxies.global", "")
 	v.SetDefault("proxies.allow_request_proxy_url", false)
 	v.SetDefault("proxies.health.failure_threshold", core.DefaultProxyFailureThreshold)
@@ -459,6 +481,15 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("auth.api_keys", "")
 	v.SetDefault("auth.header", core.DefaultAuthHeader)
 	v.SetDefault("captcha.solver_enabled", false)
+	// Viper binds an environment variable only for a key it already knows, so
+	// every key an operator may need from the environment is declared here even
+	// when its zero value is the default. Without this, OPENSERP_2CAPTCHA_APIKEY
+	// and OPENSERP_<ENGINE>_CAPTCHA were accepted silently and ignored.
+	v.SetDefault("2captcha.apikey", "")
+	for _, engine := range engineNames {
+		v.SetDefault(engine+".captcha", false)
+		v.SetDefault(engine+".proxy", "")
+	}
 }
 
 func init() {

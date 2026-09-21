@@ -54,7 +54,11 @@ type ProxiesHealthConfig struct {
 }
 
 type ProxiesConfig struct {
-	Global               string              `json:"global,omitempty" mapstructure:"global"`
+	Global string `json:"global,omitempty" mapstructure:"global"`
+	// EntryURLs declares the same pool as Entries from a single string, for a
+	// deployment configured only through environment variables. See
+	// ParseProxyEntryURLs. Entries parsed from it are merged with Entries.
+	EntryURLs            string              `json:"entry_urls,omitempty" mapstructure:"entry_urls"`
 	Entries              []ProxyEntryConfig  `json:"entries" mapstructure:"entries"`
 	Health               ProxiesHealthConfig `json:"health" mapstructure:"health"`
 	AllowRequestProxyURL bool                `json:"allow_request_proxy_url" mapstructure:"allow_request_proxy_url"`
@@ -186,10 +190,18 @@ func NormalizeProxiesConfig(cfg ProxiesConfig) (ProxiesConfig, error) {
 		failureThreshold = DefaultProxyFailureThreshold
 	}
 
-	normalizedEntries := make([]ProxyEntryConfig, 0, len(cfg.Entries))
-	entryByURL := make(map[string]int, len(cfg.Entries))
+	// Entries declared as a single string join the same pool, so the two ways
+	// of configuring it cannot disagree about tags or duplicates.
+	inlineEntries, err := ParseProxyEntryURLs(cfg.EntryURLs)
+	if err != nil {
+		return cfg, fmt.Errorf("invalid proxies.entry_urls: %w", err)
+	}
+	rawEntries := append(append([]ProxyEntryConfig{}, cfg.Entries...), inlineEntries...)
 
-	for i, rawEntry := range cfg.Entries {
+	normalizedEntries := make([]ProxyEntryConfig, 0, len(rawEntries))
+	entryByURL := make(map[string]int, len(rawEntries))
+
+	for i, rawEntry := range rawEntries {
 		proxyURL, err := NormalizeProxyURL(rawEntry.URL)
 		if err != nil {
 			return cfg, fmt.Errorf("invalid proxies.entries[%d].url: %w", i, err)
