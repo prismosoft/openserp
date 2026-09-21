@@ -114,7 +114,7 @@ func (gogl *Google) solveCaptcha(page *rod.Page, sitekey, datas, proxyURL string
 // path uses (search_raw.go), against a snapshot of the live page, so both
 // paths can't drift apart. On ErrCaptcha it then tries to solve, since that
 // needs the live page's captcha element attributes.
-func (gogl *Google) classifyPage(page *rod.Page, queryProxyURL string) error {
+func (gogl *Google) classifyPage(ctx context.Context, page *rod.Page, queryProxyURL string) error {
 	err := core.ClassifyFromPage(page, classifyGoogleDocument)
 	if page != nil {
 		if info, infoErr := page.Info(); infoErr == nil && isGoogleSorryURL(info.URL) {
@@ -124,13 +124,13 @@ func (gogl *Google) classifyPage(page *rod.Page, queryProxyURL string) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, core.ErrCaptcha) && gogl.solveCaptchaOnPage(page, queryProxyURL) {
+	if errors.Is(err, core.ErrCaptcha) && gogl.solveCaptchaOnPage(ctx, page, queryProxyURL) {
 		return nil
 	}
 	return err
 }
 
-func (gogl *Google) solveCaptchaOnPage(page *rod.Page, queryProxyURL string) bool {
+func (gogl *Google) solveCaptchaOnPage(ctx context.Context, page *rod.Page, queryProxyURL string) bool {
 	if !gogl.IsSolveCaptcha || !gogl.CaptchaSolverEnabled {
 		return false
 	}
@@ -153,7 +153,36 @@ func (gogl *Google) solveCaptchaOnPage(page *rod.Page, queryProxyURL string) boo
 	if strings.TrimSpace(proxyURL) == "" {
 		proxyURL = gogl.ProxyURL
 	}
-	return gogl.solveCaptcha(page, *sitekey, *dataS, proxyURL)
+	if !gogl.solveCaptcha(page, *sitekey, *dataS, proxyURL) {
+		return false
+	}
+	gogl.persistSolvedLaneCookies(ctx, page)
+	return true
+}
+
+// solvedCaptchaSettleTimeout bounds the wait for the navigation submitCallback()
+// triggers. The exemption cookie only exists once that lands, but a solve is
+// already worth its price for this request, so a slow settle must not fail it.
+const solvedCaptchaSettleTimeout = 15 * time.Second
+
+// persistSolvedLaneCookies saves the exemption cookie Google sets once a
+// challenge is cleared into the proxy lane's jar, so the rest of that lane's
+// requests ride this solve instead of buying one each. Without it a solver is
+// billed per request: cookies are otherwise saved during navigation, which
+// happens before the challenge is ever seen.
+func (gogl *Google) persistSolvedLaneCookies(ctx context.Context, page *rod.Page) {
+	if page == nil {
+		return
+	}
+	if err := page.Timeout(solvedCaptchaSettleTimeout).WaitLoad(); err != nil {
+		gogl.logger.Debug("Post-captcha load wait ended early: %s", err)
+	}
+	info, err := page.Info()
+	if err != nil {
+		gogl.logger.Debug("Cannot read page info after captcha solve: %s", err)
+		return
+	}
+	gogl.SaveLaneCookies(ctx, page, info.URL)
 }
 
 func (gogl *Google) preparePage(page *rod.Page) {
@@ -249,7 +278,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	defer gogl.close(ctx, page)
 	gogl.preparePage(page)
 
-	if err := gogl.classifyPage(page, query.ProxyURL); err != nil && !errors.Is(err, core.ErrEmptyResult) {
+	if err := gogl.classifyPage(ctx, page, query.ProxyURL); err != nil && !errors.Is(err, core.ErrEmptyResult) {
 		gogl.logger.Error("Page classified as %v: %s", err, url)
 		return nil, err
 	}
@@ -264,7 +293,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 	// different SERP markup for the same query.
 	searchResultElems, matchedSelector, err := core.WaitForElements(ctx, page, searchResultSelectors(), gogl.GetSelectorTimeout())
 	if err != nil {
-		if pageErr := gogl.classifyPage(page, query.ProxyURL); pageErr != nil {
+		if pageErr := gogl.classifyPage(ctx, page, query.ProxyURL); pageErr != nil {
 			if errors.Is(pageErr, core.ErrEmptyResult) {
 				return nil, nil
 			}
@@ -471,7 +500,7 @@ func (gogl *Google) Search(ctx context.Context, query core.Query) (results []cor
 
 	deduped := core.DeduplicateResults(searchResults)
 	if len(deduped) == 0 {
-		if pageErr := gogl.classifyPage(page, query.ProxyURL); pageErr != nil {
+		if pageErr := gogl.classifyPage(ctx, page, query.ProxyURL); pageErr != nil {
 			if errors.Is(pageErr, core.ErrEmptyResult) {
 				return nil, nil
 			}
@@ -532,7 +561,7 @@ func (gogl *Google) SearchImage(ctx context.Context, query core.Query) ([]core.S
 
 		resultElements, _, err := core.WaitForElements(ctx, page, []string{Selectors.ImageResults}, gogl.GetSelectorTimeout())
 		if err != nil {
-			if pageErr := gogl.classifyPage(page, query.ProxyURL); errors.Is(pageErr, core.ErrCaptcha) {
+			if pageErr := gogl.classifyPage(ctx, page, query.ProxyURL); errors.Is(pageErr, core.ErrCaptcha) {
 				gogl.logger.Error("Captcha detected: %s", url)
 				return *core.ConvertSearchResultsMap(searchResultsMap), core.ErrCaptcha
 			}
