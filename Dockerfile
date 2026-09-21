@@ -16,11 +16,18 @@ FROM chromedp/headless-shell:stable@sha256:f7e7ac721b023cb8717f8108aef8b3e49995f
 
 WORKDIR /usr/src/app
 
-# wget: used by HEALTHCHECK (localhost, no TLS, so ca-certificates not required).
+# ca-certificates: REQUIRED. The server binary is built CGO_ENABLED=0, so Go
+# uses its own TLS stack and reads the trust store off disk. This base image
+# ships no CA bundle at any path Go looks in (/etc/ssl/certs is empty), so
+# without this every outbound HTTPS call from Go fails with
+# "x509: certificate signed by unknown authority" — which is what silently
+# broke 2captcha solving. Chrome is unaffected because it carries its own
+# roots, so the browser-driven engines keep working and hide the problem.
+# wget: used by HEALTHCHECK (localhost, no TLS).
 # dumb-init: already provided by `docker run --init` / compose `init: true`,
 # so we do NOT add tini here — the PID1 reaper is supplied by the runtime.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends wget \
+  && apt-get install -y --no-install-recommends ca-certificates wget \
   && rm -rf /var/lib/apt/lists/* \
   && getent passwd chrome >/dev/null 2>&1 || useradd --create-home --uid 1001 --shell /bin/bash chrome \
   && chown chrome:chrome /usr/src/app \
