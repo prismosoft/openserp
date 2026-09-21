@@ -78,6 +78,9 @@ type ServerOptions struct {
 	AllowEndpointFallback bool
 	// EnableDebugEndpoints enables debug-only routes such as fingerprint checks.
 	EnableDebugEndpoints bool
+	// Auth configures API key authentication. With no key configured the
+	// server stays open, which is the historical behaviour.
+	Auth AuthConfig
 	// FingerprintArtifactDir is where debug fingerprint screenshots are written.
 	FingerprintArtifactDir string
 	// FingerprintBrowserOpts are the defaults for debug fingerprint runs.
@@ -178,6 +181,17 @@ func NewServerWithOptions(host string, port int, opts ServerOptions, searchEngin
 		app.Use(CORSMiddleware(opts.CORS))
 	}
 	app.Use(RequestLoggerMiddleware())
+	// After the logger, so a rejected request still appears in the log with
+	// its request ID, and before any route that does real work.
+	if opts.Auth.Enabled() {
+		app.Use(AuthMiddleware(opts.Auth))
+		logrus.WithField("header", opts.Auth.headerName()).
+			Info("API key authentication enabled")
+	} else {
+		logrus.Warn(
+			"API key authentication is DISABLED: every endpoint is public. Set an API key to require one.",
+		)
+	}
 
 	app.Get("/openapi.yaml", serv.handleOpenAPISpec)
 	app.Get("/docs", serv.handleSwaggerUI)

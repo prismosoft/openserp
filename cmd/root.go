@@ -31,6 +31,7 @@ type Config struct {
 	Resilience       ResilienceConfig     `mapstructure:"resilience"`
 	CircuitBreaker   CircuitBreakerConfig `mapstructure:"circuit_breaker"`
 	CORS             CORSConfig           `mapstructure:"cors"`
+	Auth             AuthConfig           `mapstructure:"auth"`
 	Captcha          CaptchaConfig        `mapstructure:"captcha"`
 	Config2Capcha    Config2Captcha       `mapstructure:"2captcha"`
 	GoogleConfig     EngineConfig         `mapstructure:"google"`
@@ -99,6 +100,20 @@ type CORSConfig struct {
 	AllowMethods string `mapstructure:"allow_methods"`
 	AllowHeaders string `mapstructure:"allow_headers"`
 	MaxAge       int    `mapstructure:"max_age"`
+}
+
+// AuthConfig gates the HTTP API behind an API key.
+//
+// A search API drives real browsers against other people's sites. Left open it
+// is someone else's scraping proxy on your bill, and the abuse comes back as
+// rate limits and IP blocks on the engines, degrading your own searches. Keys
+// are empty by default so an unconfigured local run is unchanged.
+type AuthConfig struct {
+	// APIKeys accepts a comma-separated list so several callers can be rotated
+	// independently. Set OPENSERP_AUTH_API_KEYS to enable authentication.
+	APIKeys string `mapstructure:"api_keys"`
+	// Header names the header carrying the key.
+	Header string `mapstructure:"header"`
 }
 
 type CaptchaConfig struct {
@@ -439,6 +454,10 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("cors.allow_methods", "GET, POST, OPTIONS")
 	v.SetDefault("cors.allow_headers", "Origin, Content-Type, Accept, Authorization, X-Use-Proxy, X-Proxy-URL, X-Proxy-Country, X-Proxy-Class, X-Proxy-Provider, X-Proxy-Session-ID, X-Request-ID, X-Tenant")
 	v.SetDefault("cors.max_age", 86400)
+	// Empty means authentication is off, which is the historical behaviour.
+	// A deployment that is reachable from the internet must set this.
+	v.SetDefault("auth.api_keys", "")
+	v.SetDefault("auth.header", core.DefaultAuthHeader)
 	v.SetDefault("captcha.solver_enabled", false)
 }
 
