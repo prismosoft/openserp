@@ -109,14 +109,56 @@ func (gogl *Google) solveCaptcha(ctx context.Context, page *rod.Page, sitekey, d
 	injectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), solvedCaptchaInjectTimeout)
 	defer cancel()
 
-	_, err = page.Context(injectCtx).Eval(fmt.Sprintf(`;(() => { document.getElementById("g-recaptcha-response").innerHTML="%s"; submitCallback(); })();`, resp))
+	submitted, err := page.Context(injectCtx).Eval(captchaSubmitJS, resp)
 	if err != nil {
 		gogl.logger.Error("Failed to set captcha response: %s", err)
 		return false
 	}
+	route := submitted.Value.String()
+	if route == "none" {
+		gogl.logger.Error("Captcha token set but no way to submit it was found")
+		return false
+	}
+	gogl.logger.Debug("Captcha token submitted via %s", route)
 
 	return true
 }
+
+// captchaSubmitJS installs the solved token and submits the challenge.
+//
+// It is a function expression taking the token as an argument, because that is
+// rod's Eval contract — it calls .apply on whatever the source evaluates to.
+// The previous form, `;(() => {...})();`, evaluated to undefined, so every
+// injection died with "TypeError: Cannot read properties of undefined
+// (reading 'apply')" before it could touch the page. Passing the token as an
+// argument also keeps it out of the source, so a token containing a quote
+// cannot break the script.
+//
+// Google's sorry page has changed shape over time: submitCallback() is not
+// always defined, so fall back to submitting the form the field belongs to.
+// The return value names the route taken, so a future change is visible in
+// the logs instead of silently doing nothing.
+const captchaSubmitJS = `(token) => {
+	const field = document.getElementById("g-recaptcha-response");
+	if (field) {
+		field.innerHTML = token;
+		field.value = token;
+	}
+	if (typeof submitCallback === "function") {
+		submitCallback();
+		return "submitCallback";
+	}
+	const form = (field && field.form) || document.querySelector("form");
+	if (form) {
+		if (typeof form.requestSubmit === "function") {
+			form.requestSubmit();
+		} else {
+			form.submit();
+		}
+		return "form";
+	}
+	return "none";
+}`
 
 // solvedCaptchaInjectTimeout bounds the post-solve page work — injecting the
 // token and letting the resulting navigation land. It runs on a context
