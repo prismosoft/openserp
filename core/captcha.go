@@ -10,7 +10,11 @@ import (
 )
 
 type captchaClient interface {
-	Solve(api2captcha.Request) (string, string, error)
+	// Solve submits the captcha and waits for its answer. transportProxyURL
+	// routes the API call itself, so the request reaches 2captcha from the
+	// same lane the solve is being bought for rather than from the
+	// deployment's datacenter IP.
+	Solve(req api2captcha.Request, transportProxyURL string) (string, string, error)
 }
 
 type CaptchaSolver struct {
@@ -33,13 +37,8 @@ func NewSolver(apikey string, solveTimeout time.Duration) *CaptchaSolver {
 	if solveTimeout <= 0 {
 		solveTimeout = DefaultCaptchaSolveTimeout
 	}
-	client := api2captcha.NewClient(apikey)
-	// Only RecaptchaTimeout governs the wait for a result; DefaultTimeout also
-	// sets the HTTP client's per-call timeout, so shortening it would break
-	// individual API calls rather than bounding the wait.
-	client.RecaptchaTimeout = int(solveTimeout / time.Second)
 	return &CaptchaSolver{
-		client: client,
+		client: newTwoCaptchaAPIClient(apikey, solveTimeout),
 	}
 }
 
@@ -65,7 +64,7 @@ func (cs *CaptchaSolver) SolveReCaptcha2(sitekey, pageURL, dataS, proxyURL strin
 		req.SetProxy(proxyType, proxyAddr)
 	}
 
-	resp, id, err := cs.client.Solve(req)
+	resp, id, err := cs.client.Solve(req, proxyURL)
 	if err != nil {
 		captchaSolverFailuresTotal.Add(1)
 		return resp, id, err
