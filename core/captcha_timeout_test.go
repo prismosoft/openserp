@@ -7,37 +7,34 @@ import (
 	api2captcha "github.com/2captcha/2captcha-go"
 )
 
-// NewSolver must always configure a bounded ReCaptcha wait. Left alone the
-// 2captcha client polls for 600s, pinning a browser page and its proxy lane
-// for ten minutes — long after the caller's own timeout has given up.
-func TestNewSolverBoundsTheRecaptchaWait(t *testing.T) {
-	defaultSeconds := int(DefaultCaptchaSolveTimeout / time.Second)
-
+// NewSolver must always configure a bounded wait. api2captcha would poll for
+// 600s, pinning a browser page and its proxy lane for ten minutes — long after
+// the caller's own timeout has given up.
+func TestNewSolverBoundsTheSolveWait(t *testing.T) {
 	cases := map[string]struct {
 		given time.Duration
-		want  int
+		want  time.Duration
 	}{
-		"explicit": {given: 45 * time.Second, want: 45},
-		"zero":     {given: 0, want: defaultSeconds},
-		"negative": {given: -1 * time.Second, want: defaultSeconds},
+		"explicit": {given: 45 * time.Second, want: 45 * time.Second},
+		"zero":     {given: 0, want: DefaultCaptchaSolveTimeout},
+		"negative": {given: -1 * time.Second, want: DefaultCaptchaSolveTimeout},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			solver := NewSolver("api-key", tc.given)
-			client, ok := solver.client.(*api2captcha.Client)
+			client, ok := NewSolver("api-key", tc.given).client.(*twoCaptchaAPIClient)
 			if !ok {
-				t.Fatalf("solver client is %T, want *api2captcha.Client", solver.client)
+				t.Fatalf("solver client is %T", NewSolver("api-key", tc.given).client)
 			}
-			if client.RecaptchaTimeout != tc.want {
-				t.Fatalf("RecaptchaTimeout = %d, want %d", client.RecaptchaTimeout, tc.want)
+			if client.timeout != tc.want {
+				t.Fatalf("timeout = %s, want %s", client.timeout, tc.want)
 			}
 		})
 	}
 }
 
-// The library's own default is the hazard this guards against; if a dependency
-// bump ever made it shorter than ours, ours would be the pessimisation.
+// The library's own default is the hazard this bounds; if a dependency bump
+// ever made it shorter than ours, ours would be the pessimisation.
 func TestDefaultCaptchaSolveTimeoutIsShorterThanTheLibrarys(t *testing.T) {
 	libraryDefault := api2captcha.NewClient("api-key").RecaptchaTimeout
 	if int(DefaultCaptchaSolveTimeout/time.Second) >= libraryDefault {

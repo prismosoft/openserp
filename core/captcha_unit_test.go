@@ -8,14 +8,16 @@ import (
 )
 
 type captchaClientMock struct {
-	lastReq api2captcha.Request
-	calls   int
-	err     error
+	lastReq      api2captcha.Request
+	lastProxyURL string
+	calls        int
+	err          error
 }
 
-func (m *captchaClientMock) Solve(req api2captcha.Request) (string, string, error) {
+func (m *captchaClientMock) Solve(req api2captcha.Request, transportProxyURL string) (string, string, error) {
 	m.calls++
 	m.lastReq = req
+	m.lastProxyURL = transportProxyURL
 	if m.err != nil {
 		return "", "", m.err
 	}
