@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	api2captcha "github.com/2captcha/2captcha-go"
 )
@@ -16,9 +17,29 @@ type CaptchaSolver struct {
 	client captchaClient
 }
 
-func NewSolver(apikey string) *CaptchaSolver {
+// DefaultCaptchaSolveTimeout bounds how long a single solve may be waited on.
+//
+// The 2captcha client defaults to 600s for ReCaptcha, polling every 10s. That
+// wait blocks a browser page and its proxy lane for ten minutes — long after
+// the caller's own timeout (30s for VidBlitz) has given up on the request. The
+// solve is still worth starting, because clearing the challenge warms the lane
+// for the requests behind it, but it must not hold resources indefinitely to
+// do so.
+const DefaultCaptchaSolveTimeout = 100 * time.Second
+
+// NewSolver builds a 2captcha-backed solver. A non-positive solveTimeout falls
+// back to DefaultCaptchaSolveTimeout.
+func NewSolver(apikey string, solveTimeout time.Duration) *CaptchaSolver {
+	if solveTimeout <= 0 {
+		solveTimeout = DefaultCaptchaSolveTimeout
+	}
+	client := api2captcha.NewClient(apikey)
+	// Only RecaptchaTimeout governs the wait for a result; DefaultTimeout also
+	// sets the HTTP client's per-call timeout, so shortening it would break
+	// individual API calls rather than bounding the wait.
+	client.RecaptchaTimeout = int(solveTimeout / time.Second)
 	return &CaptchaSolver{
-		client: api2captcha.NewClient(apikey),
+		client: client,
 	}
 }
 

@@ -118,6 +118,10 @@ type AuthConfig struct {
 
 type CaptchaConfig struct {
 	SolverEnabled bool `mapstructure:"solver_enabled"`
+	// SolveTimeoutSeconds bounds the wait for one solve. The 2captcha client
+	// would otherwise wait 600s, holding a page and its proxy lane long after
+	// the caller gave up. Non-positive means core.DefaultCaptchaSolveTimeout.
+	SolveTimeoutSeconds int `mapstructure:"solve_timeout_seconds"`
 }
 
 var config = Config{}
@@ -481,6 +485,7 @@ func setConfigDefaults(v *viper.Viper) {
 	v.SetDefault("auth.api_keys", "")
 	v.SetDefault("auth.header", core.DefaultAuthHeader)
 	v.SetDefault("captcha.solver_enabled", false)
+	v.SetDefault("captcha.solve_timeout_seconds", int(core.DefaultCaptchaSolveTimeout/time.Second))
 	// Viper binds an environment variable only for a key it already knows, so
 	// every key an operator may need from the environment is declared here even
 	// when its zero value is the default. Without this, OPENSERP_2CAPTCHA_APIKEY

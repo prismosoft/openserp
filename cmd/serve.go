@@ -75,7 +75,7 @@ func serve(cmd *cobra.Command, args []string) {
 	corsCfg.AllowHeaders = config.CORS.AllowHeaders
 	corsCfg.MaxAge = config.CORS.MaxAge
 
-	captchaSolverEnabled, captchaSolverAPIKey, err := resolveCaptchaSolverConfig()
+	captchaSolverEnabled, captchaSolverAPIKey, captchaSolveTimeout, err := resolveCaptchaSolverConfig()
 	if err != nil {
 		logrus.Error(err)
 		os.Exit(1)
@@ -113,6 +113,7 @@ func serve(cmd *cobra.Command, args []string) {
 	baseOpts.LeavePageOpen = config.App.IsLeaveHead
 	baseOpts.CaptchaSolverEnabled = captchaSolverEnabled
 	baseOpts.CaptchaSolverApiKey = captchaSolverAPIKey
+	baseOpts.CaptchaSolverTimeout = captchaSolveTimeout
 
 	engines, closeBrowsers, browserResolver, err := buildBrowserEngines(baseOpts, proxyCfg)
 	if err != nil {

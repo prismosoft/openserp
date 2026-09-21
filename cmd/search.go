@@ -86,7 +86,7 @@ func search(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	captchaSolverEnabled, captchaSolverAPIKey, err := resolveCaptchaSolverConfig()
+	captchaSolverEnabled, captchaSolverAPIKey, captchaSolveTimeout, err := resolveCaptchaSolverConfig()
 	if err != nil {
 		return fmt.Errorf("validate captcha solver config: %w", err)
 	}
@@ -132,7 +132,7 @@ func search(cmd *cobra.Command, args []string) error {
 		results, err = searchRaw(ctx, spec, query)
 	} else {
 		logrus.WithField("engine", engineType).Info(fmt.Sprintf("Using browser mode for %s search", engineType))
-		results, err = searchBrowser(ctx, spec, query, selectedProxy, captchaSolverEnabled, captchaSolverAPIKey)
+		results, err = searchBrowser(ctx, spec, query, selectedProxy, captchaSolverEnabled, captchaSolverAPIKey, captchaSolveTimeout)
 	}
 
 	if err != nil {
@@ -146,7 +146,7 @@ func search(cmd *cobra.Command, args []string) error {
 
 	env := buildCLIEnvelope(spec.name, query, results, startedAt)
 	if query.Extract {
-		if err := enrichCLIEnvelopeWithExtraction(ctx, env, query, format, selectedProxy, captchaSolverEnabled, captchaSolverAPIKey); err != nil {
+		if err := enrichCLIEnvelopeWithExtraction(ctx, env, query, format, selectedProxy, captchaSolverEnabled, captchaSolverAPIKey, captchaSolveTimeout); err != nil {
 			return fmt.Errorf("extract search results: %w", err)
 		}
 	}
@@ -218,12 +218,12 @@ func normalizeCLIExtractTop(raw int) (int, error) {
 	return raw, nil
 }
 
-func enrichCLIEnvelopeWithExtraction(ctx context.Context, env *core.Envelope, query core.Query, format string, proxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string) error {
+func enrichCLIEnvelopeWithExtraction(ctx context.Context, env *core.Envelope, query core.Query, format string, proxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string, captchaSolveTimeout time.Duration) error {
 	if env == nil || !query.Extract {
 		return nil
 	}
 	query.ProxyURL = proxyURL
-	extractor, closeExtractor, err := newCLIExtractor(captchaSolverEnabled, captchaSolverAPIKey)
+	extractor, closeExtractor, err := newCLIExtractor(captchaSolverEnabled, captchaSolverAPIKey, captchaSolveTimeout)
 	if err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func enrichCLIEnvelopeWithExtraction(ctx context.Context, env *core.Envelope, qu
 // newCLIExtractor builds an Extractor backed by a lazily-created, single-use
 // browser. The raw path delegates to core.RawExtractFetch; the rendered path
 // validates the target, gates auth'd SOCKS, then reuses core.RenderExtractHTML.
-func newCLIExtractor(captchaSolverEnabled bool, captchaSolverAPIKey string) (extractpkg.Extractor, func(), error) {
+func newCLIExtractor(captchaSolverEnabled bool, captchaSolverAPIKey string, captchaSolveTimeout time.Duration) (extractpkg.Extractor, func(), error) {
 	cfg := config.Extract.Normalized()
 	var browserMu sync.Mutex
 	var browser *core.Browser
@@ -273,7 +273,7 @@ func newCLIExtractor(captchaSolverEnabled bool, captchaSolverAPIKey string) (ext
 
 			browserMu.Lock()
 			if browser == nil {
-				created, err := newCLIExtractBrowser(cfg, req.ProxyURL, captchaSolverEnabled, captchaSolverAPIKey)
+				created, err := newCLIExtractBrowser(cfg, req.ProxyURL, captchaSolverEnabled, captchaSolverAPIKey, captchaSolveTimeout)
 				if err != nil {
 					browserMu.Unlock()
 					return nil, err
@@ -289,7 +289,7 @@ func newCLIExtractor(captchaSolverEnabled bool, captchaSolverAPIKey string) (ext
 	return extractor, closeExtractor, nil
 }
 
-func newCLIExtractBrowser(cfg extractpkg.Config, proxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string) (*core.Browser, error) {
+func newCLIExtractBrowser(cfg extractpkg.Config, proxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string, captchaSolveTimeout time.Duration) (*core.Browser, error) {
 	blockedResourceTypes, err := core.ParseBlockedResourceTypes(config.App.BlockResources)
 	if err != nil {
 		return nil, fmt.Errorf("invalid block_resources config: %w", err)
@@ -301,6 +301,7 @@ func newCLIExtractBrowser(cfg extractpkg.Config, proxyURL string, captchaSolverE
 		LeavePageOpen:        false,
 		CaptchaSolverEnabled: captchaSolverEnabled,
 		CaptchaSolverApiKey:  captchaSolverAPIKey,
+		CaptchaSolverTimeout: captchaSolveTimeout,
 		BrowserPath:          config.App.BrowserPath,
 		ProxyURL:             proxyURL,
 		Insecure:             config.Server.Insecure,
@@ -340,7 +341,7 @@ func normalizeSearchFormat(raw string) (string, error) {
 	}
 }
 
-func searchBrowser(ctx context.Context, spec engineSpec, query core.Query, browserProxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string) ([]core.SearchResult, error) {
+func searchBrowser(ctx context.Context, spec engineSpec, query core.Query, browserProxyURL string, captchaSolverEnabled bool, captchaSolverAPIKey string, captchaSolveTimeout time.Duration) ([]core.SearchResult, error) {
 	blockedResourceTypes, err := core.ParseBlockedResourceTypes(config.App.BlockResources)
 	if err != nil {
 		return nil, fmt.Errorf("invalid block_resources config: %w", err)
@@ -360,6 +361,7 @@ func searchBrowser(ctx context.Context, spec engineSpec, query core.Query, brows
 		LeavePageOpen:        config.App.IsLeaveHead,
 		CaptchaSolverEnabled: captchaSolverEnabled,
 		CaptchaSolverApiKey:  captchaSolverAPIKey,
+		CaptchaSolverTimeout: captchaSolveTimeout,
 		BrowserPath:          config.App.BrowserPath,
 		ProxyURL:             browserProxyURL,
 		Insecure:             config.Server.Insecure,
