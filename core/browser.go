@@ -1059,6 +1059,16 @@ func (b *Browser) restoreLaneCookies(ctx context.Context, page *rod.Page) error 
 	return nil
 }
 
+// SaveLaneCookies persists the page's current cookies into the proxy lane's
+// jar. Navigation already does this (see navigate), but it does so before an
+// engine has looked at the page, so a cookie the engine only earns later —
+// the exemption Google sets once a captcha is cleared — would be lost when the
+// page closes, and the next request on the lane would be challenged again.
+// Engines that clear a challenge mid-request call this to keep that proof.
+func (b *Browser) SaveLaneCookies(ctx context.Context, page *rod.Page, pageURL string) {
+	b.saveLaneCookies(ctx, page, pageURL)
+}
+
 func (b *Browser) saveLaneCookies(ctx context.Context, page *rod.Page, pageURL string) {
 	if b == nil || b.ProxyLaneStore == nil || page == nil {
 		return
